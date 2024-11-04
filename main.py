@@ -45,7 +45,9 @@ class Out:
     out_files_path = f"{out_path}/files.json"
     out_success_path = f"{out_path}/success.json"
     out_failure_path = f"{out_path}/failure.json"
+    out_ignore_path = f"{out_path}/ignore.json"
     successes = None
+    ignores = None
 
     def make_dirs(self):
         os.makedirs(self.out_path, exist_ok=True)
@@ -130,6 +132,16 @@ class Out:
                     self.successes = set(json.load(f))
 
         return self.successes
+
+    def get_ignres(self):
+        if self.ignores == None:
+            self.ignores = set()
+
+            if os.path.exists(self.out_ignore_path):
+                with open(self.out_ignore_path, "r", encoding="utf-8") as f:
+                    self.ignores = set(json.load(f))
+
+        return self.ignores
 
 
 class Requester:
@@ -344,12 +356,24 @@ class Syncer:
                 print(f"Skip success {it["id"]}")
                 continue
 
+            ignores = out.get_ignres()
+            if it["id"] in ignores:
+                print(f"Skip ignore {it["id"]}")
+                continue
+
             if it["filename"].endswith(".livp"):
                 print(f"Skip ext livp file {it["id"]}")
                 continue
 
             print(f"Download file {it["id"]}")
-            self.download(it)
+            file = self.download(it)
+
+            if file == None:
+                print(f"Skip download failure {it["id"]}")
+                continue
+
+            print(f"Save downloaded file {it["id"]}")
+            self.save_download(file.content)
 
             print(f"Upload asset {it["id"]}")
             asset_json = self.upload_asset(it)
@@ -384,19 +408,18 @@ class Syncer:
                     "walked_i": self.walked_i,
                     "url": file["dlink"],
                     "id": file["id"],
+                    "filename": file["filename"],
                     "time": datetime.now().strftime("%Y/%m/%d %H:%M:%S"),
                 }
             )
 
-        response = self.requester.request(try_fn, catch_fn)
+        return self.requester.request(try_fn, catch_fn)
 
-        if response == None:
-            print(f"Skip download failure {file["id"]}")
-            return
-
+    def save_download(self, file):
         save_path = f"{out.out_download_dir_path}/{file["filename"]}"
+
         with open(save_path, "wb") as f:
-            f.write(response.content)
+            f.write(file)
 
     def remove(self, file):
         save_path = f"{out.out_download_dir_path}/{file["filename"]}"
@@ -480,8 +503,7 @@ class Syncer:
                 }
             )
 
-        response_json = self.requester.request(try_fn, catch_fn)
-        return response_json
+        return self.requester.request(try_fn, catch_fn)
 
     def add_asset_to_album(self, file, asset_json):
         def try_fn():
